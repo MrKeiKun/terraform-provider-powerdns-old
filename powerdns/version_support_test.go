@@ -2,8 +2,11 @@ package powerdns
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"os"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -155,5 +158,70 @@ func testAccPreCheckComments(t *testing.T) {
 	detectServerCapabilities(t)
 	if !serverCaps.comments {
 		t.Skip("backend does not store record comments (LMDB gained these in PowerDNS 5.1; gpgsql supports them)")
+	}
+}
+
+// testAccPreCheckRecursorHostnames skips a test when the Recursor only accepts
+// IP addresses as forwarders. Recursor 5.1 does: a host name in a forward zone
+// is refused when the zone is created, and the Recursor then fails to start
+// because the name was saved. 5.3 resolves host names. Asking the server by
+// writing one would leave that bad entry behind, so this reads the version.
+func testAccPreCheckRecursorHostnames(t *testing.T) {
+	t.Helper()
+	testAccPreCheckRecursor(t)
+
+	serverID := os.Getenv("PDNS_RECURSOR_SERVER_ID")
+	if serverID == "" {
+		serverID = "localhost"
+	}
+	url := strings.TrimRight(os.Getenv("PDNS_RECURSOR_SERVER_URL"), "/") + "/api/v1/servers/" + serverID
+	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("building the recursor version request: %v", err)
+	}
+	req.Header.Set("X-API-Key", os.Getenv("PDNS_API_KEY"))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("reading the recursor version: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	var info struct {
+		Version string `json:"version"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		t.Fatalf("decoding the recursor version: %v", err)
+	}
+	major, minor, ok := parseMajorMinor(info.Version)
+	if !ok {
+		t.Fatalf("cannot read the recursor version %q", info.Version)
+	}
+	if major < 5 || (major == 5 && minor < 3) {
+		t.Skipf("Recursor %s accepts only IP addresses as forwarders; host names need 5.3 or later", info.Version)
+	}
+}
+
+// parseMajorMinor reads the first two numbers of a version such as "5.1.10".
+func parseMajorMinor(version string) (major, minor int, ok bool) {
+	parts := strings.SplitN(version, ".", 3)
+	if len(parts) < 2 {
+		return 0, 0, false
+	}
+	major, errMajor := strconv.Atoi(parts[0])
+	minor, errMinor := strconv.Atoi(parts[1])
+	return major, minor, errMajor == nil && errMinor == nil
+}
+
+func TestParseMajorMinor(t *testing.T) {
+	for version, want := range map[string][2]int{"5.1.10": {5, 1}, "5.4.0": {5, 4}, "4.9": {4, 9}} {
+		major, minor, ok := parseMajorMinor(version)
+		if !ok || major != want[0] || minor != want[1] {
+			t.Errorf("parseMajorMinor(%q) = %d.%d, %v; want %d.%d", version, major, minor, ok, want[0], want[1])
+		}
+	}
+	for _, bad := range []string{"", "5", "x.y.z"} {
+		if _, _, ok := parseMajorMinor(bad); ok {
+			t.Errorf("parseMajorMinor(%q) should fail", bad)
+		}
 	}
 }

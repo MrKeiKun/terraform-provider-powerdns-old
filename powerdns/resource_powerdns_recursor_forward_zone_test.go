@@ -340,7 +340,7 @@ resource "powerdns_recursor_forward_zone" "host" {
 }
 `
 	resource.Test(t, resource.TestCase{
-		PreCheck:                 func() { testAccPreCheckRecursor(t) },
+		PreCheck:                 func() { testAccPreCheckRecursorHostnames(t) },
 		ProtoV6ProviderFactories: testAccProtoV6ProviderFactories,
 		CheckDestroy:             testAccCheckPowerDNSRecursorForwardZoneDestroy,
 		Steps: []resource.TestStep{
