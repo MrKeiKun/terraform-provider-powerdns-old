@@ -158,7 +158,10 @@ func (r *networkResource) upsert(ctx context.Context, m *networkModel, diags *di
 		return
 	}
 
-	m.ID = types.StringValue(network)
+	// The id stays as it was when only the spelling of the network changes.
+	if m.ID.IsNull() || m.ID.IsUnknown() {
+		m.ID = types.StringValue(network)
+	}
 	if !r.refresh(ctx, m, diags) && !diags.HasError() {
 		diags.AddError("Network not found after write", network)
 	}

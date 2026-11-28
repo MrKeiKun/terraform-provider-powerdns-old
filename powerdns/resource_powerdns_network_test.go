@@ -146,3 +146,30 @@ func TestNetworkKeepsConfiguredSpelling(t *testing.T) {
 		t.Fatalf("network after refresh = %q, want the configured spelling", got)
 	}
 }
+
+// Changing only the spelling of a network is an update, and the id, which
+// Terraform already holds, must not change with it.
+func TestNetworkSpellingChangeKeepsID(t *testing.T) {
+	client := newTestClient(func(r *http.Request) (*http.Response, error) {
+		if r.Method == http.MethodGet {
+			return jsonResponse(http.StatusOK, `{"network":"2001:db8::/32","view":"internal"}`), nil
+		}
+		return jsonResponse(http.StatusNoContent, ""), nil
+	})
+	h := newResourceHarness(t, newNetworkResource(), &ProviderClients{PDNS: client})
+	created, diags := h.create(map[string]tftypes.Value{"network": tfString("2001:0db8:0000::/32"), "view": tfString("internal")})
+	if diags.HasError() {
+		t.Fatalf("create failed: %v", diags)
+	}
+
+	updated, diags := h.update(created, map[string]tftypes.Value{"network": tfString("2001:db8::/32"), "view": tfString("internal")})
+	if diags.HasError() {
+		t.Fatalf("update failed: %v", diags)
+	}
+	if got, want := tfAttrString(t, updated, "id"), tfAttrString(t, created, "id"); got != want {
+		t.Fatalf("id changed from %q to %q", want, got)
+	}
+	if got := tfAttrString(t, updated, "network"); got != "2001:db8::/32" {
+		t.Fatalf("network = %q, want the new spelling", got)
+	}
+}
